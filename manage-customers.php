@@ -176,9 +176,13 @@ ob_end_flush(); // Send output
                         }
                         echo "<tr class='$rowClass'>
                             <td>{$serial}</td>
-                            <td><img src='{$profilePic}' alt='Profile' class='profile'></td>
-                            <td><a href='view_customer.php?id={$row['id']}' class='name-link'><strong>Name:</strong> " . strtoupper(htmlspecialchars($row['firstname'] . ' ' . $row['lastname'])) . "</a><br>
-                                <span class='email'>Email: " . htmlspecialchars($row['email']) . "</span></td>
+                            <td>
+                                <img src='{$profilePic}' alt='Profile' class='profile' data-bs-toggle='modal' data-bs-target='#imageModal' data-image-src='{$profilePic}' style='cursor: pointer;'>
+                            </td>
+                            <td>
+                                <a href='view_customer.php?id={$row['id']}' class='name-link'><strong>Name:</strong> " . strtoupper(htmlspecialchars($row['firstname'] . ' ' . $row['lastname'])) . "</a><br>
+                                <span class='email'>Email: <a href='view_customer.php?id={$row['id']}' class='name-link'>" . htmlspecialchars($row['email']) . "</a></span>
+                            </td>
                             <td>" . date('D, d/M/Y – h:i A', strtotime($row['created_at'])) . "</td>
                             <td>" . (isset($row['updated_at']) ? date('D, d/M/Y – h:i A', strtotime($row['updated_at'])) : 'N/A') . "</td>";
                         if ($role === 1) {
@@ -204,6 +208,22 @@ ob_end_flush(); // Send output
                 </tbody>
             </table>
         </div>
+
+        <!-- Modal for enlarged profile picture -->
+        <div class="modal fade" id="imageModal" tabindex="-1" aria-labelledby="imageModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="imageModalLabel">Profile Picture</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body text-center">
+                        <img id="enlargedImage" src="" alt="Enlarged Profile" style="max-width: 100%; max-height: 500px; object-fit: contain;">
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <!-- Bootstrap JS (for any interactive components if needed) -->
@@ -214,6 +234,15 @@ ob_end_flush(); // Send output
         window.onpopstate = function () {
             history.go(1); // Push forward to prevent back
         };
+
+        // For modal image enlargement
+        const imageModal = document.getElementById('imageModal');
+        imageModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget; // The image that triggered the modal
+            const imageSrc = button.getAttribute('data-image-src');
+            const modalImage = document.getElementById('enlargedImage');
+            modalImage.src = imageSrc;
+        });
     </script>
 </body>
 </html>
