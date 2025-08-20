@@ -3,166 +3,223 @@ ob_start(); // Output buffering start to allow headers anytime
 session_start();
 require 'db_connect.php';
 
-$_SESSION['loggedin'] = true;
+// Remove forced login for security - rely on actual login system
+// $_SESSION['loggedin'] = true; // Commented out
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
     header("Location: login.php"); 
     exit; 
 }
 
+// CSRF Token Generation
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+// Check DB connection
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
+
 $errors = []; // Array to store validation errors
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $firstname = trim($_POST['firstname']);
-    $lastname  = trim($_POST['lastname']);
-    $email     = trim($_POST['email']);
-    $phone     = trim($_POST['phone']);
-    $city      = trim($_POST['city']);
-    $state     = trim($_POST['state']);
-    $zip       = trim($_POST['zip']);
-    $dob       = trim($_POST['dob']);
-
-    // Firstname Validation Checks (Professional Level)
-    if (empty($firstname)) {
-        $errors[] = "Firstname is required.";
+    // CSRF Validation
+    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+        $errors[] = "Invalid form submission (CSRF token mismatch).";
     } else {
-        // Length: min 2, max 50
-        if (strlen($firstname) < 2 || strlen($firstname) > 50) {
-            $errors[] = "Firstname must be between 2 and 50 characters.";
-        }
-        // Allowed characters: alphabets, spaces, hyphens, apostrophes
-        if (!preg_match("/^[A-Za-z\s\-']+$/", $firstname)) {
-            $errors[] = "Invalid firstname: Only alphabets, spaces, hyphens, and apostrophes allowed.";
-        }
-        // No leading/trailing spaces (already trimmed, but extra check)
-        if ($firstname !== trim($firstname)) {
-            $errors[] = "Firstname should not have leading/trailing spaces.";
-        }
-        // Simple profanity check (add more words if needed)
-        $bad_words = ['badword1', 'offensive']; // Expand this list
-        if (in_array(strtolower($firstname), $bad_words)) {
-            $errors[] = "Invalid firstname: Contains prohibited words.";
-        }
-    }
+        $firstname = trim($_POST['firstname']);
+        $lastname  = trim($_POST['lastname']);
+        $email     = trim($_POST['email']);
+        $phone     = trim($_POST['phone']);
+        $city      = trim($_POST['city']);
+        $state     = trim($_POST['state']);
+        $pincode   = trim($_POST['pincode']); // Changed from zip to pincode
+        $dob       = trim($_POST['dob']);
 
-    // Lastname Validation Checks (Similar to Firstname)
-    if (empty($lastname)) {
-        $errors[] = "Lastname is required.";
-    } else {
-        if (strlen($lastname) < 2 || strlen($lastname) > 50) {
-            $errors[] = "Lastname must be between 2 and 50 characters.";
+        // Empty checks for select fields
+        if (empty($city)) {
+            $errors[] = "City is required.";
         }
-        if (!preg_match("/^[A-Za-z\s\-']+$/", $lastname)) {
-            $errors[] = "Invalid lastname: Only alphabets, spaces, hyphens, and apostrophes allowed.";
+        if (empty($state)) {
+            $errors[] = "State is required.";
         }
-        if ($lastname !== trim($lastname)) {
-            $errors[] = "Lastname should not have leading/trailing spaces.";
-        }
-        // Profanity check
-        if (in_array(strtolower($lastname), $bad_words)) {
-            $errors[] = "Invalid lastname: Contains prohibited words.";
-        }
-    }
 
-    // Validate email: proper format
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $errors[] = "Invalid email: Please enter a valid email address.";
-    }
+        // Firstname Validation Checks (Professional Level)
+        if (empty($firstname)) {
+            $errors[] = "Firstname is required.";
+        } else {
+            // Length: min 2, max 50
+            if (strlen($firstname) < 2 || strlen($firstname) > 50) {
+                $errors[] = "Firstname must be between 2 and 50 characters.";
+            }
+            // Allowed characters: alphabets, spaces, hyphens, apostrophes
+            if (!preg_match("/^[A-Za-z\s\-']+$/", $firstname)) {
+                $errors[] = "Invalid firstname: Only alphabets, spaces, hyphens, and apostrophes allowed.";
+            }
+            // No leading/trailing spaces (already trimmed, but extra check)
+            if ($firstname !== trim($firstname)) {
+                $errors[] = "Firstname should not have leading/trailing spaces.";
+            }
+            // Simple profanity check (case-insensitive)
+            $bad_words = ['badword1', 'offensive']; // Expand this list
+            if (in_array(strtolower($firstname), array_map('strtolower', $bad_words))) {
+                $errors[] = "Invalid firstname: Contains prohibited words.";
+            }
+        }
 
-    // Phone Number Validation Checks (Professional Level)
-    $full_phone = '+91' . $phone; // Hardcode +91 as per original code
-    if (empty($phone)) {
-        $errors[] = "Phone number is required.";
-    } else {
-        // Format, Length, and Numeric Check
-        if (!preg_match('/^(\+91)?[6-9]\d{9}$/', $full_phone) || strlen($phone) !== 10) {
-            $errors[] = "Invalid phone number: Must be exactly 10 digits starting with 6-9 (optional +91).";
+        // Lastname Validation Checks (Similar to Firstname)
+        if (empty($lastname)) {
+            $errors[] = "Lastname is required.";
+        } else {
+            if (strlen($lastname) < 2 || strlen($lastname) > 50) {
+                $errors[] = "Lastname must be between 2 and 50 characters.";
+            }
+            if (!preg_match("/^[A-Za-z\s\-']+$/", $lastname)) {
+                $errors[] = "Invalid lastname: Only alphabets, spaces, hyphens, and apostrophes allowed.";
+            }
+            if ($lastname !== trim($lastname)) {
+                $errors[] = "Lastname should not have leading/trailing spaces.";
+            }
+            // Profanity check (case-insensitive)
+            if (in_array(strtolower($lastname), array_map('strtolower', $bad_words))) {
+                $errors[] = "Invalid lastname: Contains prohibited words.";
+            }
         }
-        if (!is_numeric($phone)) {
-            $errors[] = "Phone number must contain only digits.";
-        }
-        // Uniqueness Check
-        $stmt = $conn->prepare("SELECT id FROM customers WHERE phone = ?");
-        $stmt->bind_param("s", $full_phone);
-        $stmt->execute();
-        $stmt->store_result();
-        if ($stmt->num_rows > 0) {
-            $errors[] = "This phone number is already registered.";
-        }
-        $stmt->close();
-        // Security: Sanitize
-        $phone = filter_var($phone, FILTER_SANITIZE_NUMBER_INT);
-    }
 
-    // DOB Validation Checks (Professional Level)
-    if (empty($dob)) {
-        $errors[] = "Date of Birth is required.";
-    } else {
-        // Format Validation
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dob)) {
-            $errors[] = "Invalid DOB: Required format is YYYY-MM-DD (e.g., 1990-01-01).";
+        // Validate email: proper format
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $errors[] = "Invalid email: Please enter a valid email address.";
         }
-        // Valid Date Check
-        $date_parts = explode('-', $dob);
-        if (count($date_parts) === 3 && !checkdate($date_parts[1], $date_parts[2], $date_parts[0])) {
-            $errors[] = "Invalid DOB: Date does not exist (e.g., invalid day/month).";
+        // Email uniqueness check
+        if (!empty($email)) {
+            $stmt = $conn->prepare("SELECT id FROM customers WHERE email = ?");
+            $stmt->bind_param("s", $email);
+            $stmt->execute();
+            $stmt->store_result();
+            if ($stmt->num_rows > 0) {
+                $errors[] = "This email is already registered.";
+            }
+            $stmt->close();
         }
-        // Past Date Only
-        if (strtotime($dob) > time()) {
-            $errors[] = "Invalid DOB: Cannot be in the future.";
-        }
-        // Age Range (18-120)
-        $age = date_diff(date_create($dob), date_create('today'))->y;
-        if ($age < 18) {
-            $errors[] = "You must be at least 18 years old.";
-        } elseif ($age > 120) {
-            $errors[] = "Invalid DOB: Age exceeds reasonable limit.";
-        }
-    }
 
-    // Validate ZIP: 6 digits, and basic city-based check (example ranges for professionalism)
-    if (!preg_match('/^\d{6}$/', $zip)) {
-        $errors[] = "Invalid ZIP: Must be exactly 6 digits.";
-    } else {
-        // Simple city-based ZIP range check (expand as needed)
-        $zip_int = intval($zip);
-        $valid_zip = false;
-        switch ($city) {
-            case 'Delhi': // Example: 110000-110099
-                if ($zip_int >= 110000 && $zip_int <= 110099) $valid_zip = true;
-                break;
-            case 'Mumbai': // Example: 400000-400099
-                if ($zip_int >= 400000 && $zip_int <= 400099) $valid_zip = true;
-                break;
-            // Add more cities as per your list
-            default:
-                $valid_zip = true; // If city not in list, allow (expand this)
+        // Phone Number Validation Checks (Professional Level)
+        $full_phone = '+91' . $phone; // Hardcode +91 as per original code
+        if (empty($phone)) {
+            $errors[] = "Phone number is required.";
+        } else {
+            // Format, Length, and Numeric Check
+            if (!preg_match('/^(\+91)?[6-9]\d{9}$/', $full_phone) || strlen($phone) !== 10) {
+                $errors[] = "Invalid phone number: Must be exactly 10 digits starting with 6-9 (optional +91).";
+            }
+            if (!is_numeric($phone)) {
+                $errors[] = "Phone number must contain only digits.";
+            }
+            // Uniqueness Check
+            $stmt = $conn->prepare("SELECT id FROM customers WHERE phone = ?");
+            $stmt->bind_param("s", $full_phone);
+            $stmt->execute();
+            $stmt->store_result();
+            if ($stmt->num_rows > 0) {
+                $errors[] = "This phone number is already registered.";
+            }
+            $stmt->close();
+            // Security: Sanitize
+            $phone = filter_var($phone, FILTER_SANITIZE_NUMBER_INT);
         }
-        if (!$valid_zip) {
-            $errors[] = "Invalid ZIP for selected city: Does not match the city's range.";
+
+        // DOB Validation Checks (Professional Level)
+        if (empty($dob)) {
+            $errors[] = "Date of Birth is required.";
+        } else {
+            // Format Validation
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dob)) {
+                $errors[] = "Invalid DOB: Required format is YYYY-MM-DD (e.g., 1990-01-01).";
+            }
+            // Valid Date Check
+            $date_parts = explode('-', $dob);
+            if (count($date_parts) !== 3 || !checkdate($date_parts[1], $date_parts[2], $date_parts[0])) {
+                $errors[] = "Invalid DOB: Date does not exist (e.g., invalid day/month).";
+            } else {
+                // Past Date Only
+                if (strtotime($dob) > time()) {
+                    $errors[] = "Invalid DOB: Cannot be in the future.";
+                }
+                // Age Range (18-120)
+                $age = date_diff(date_create($dob), date_create('today'))->y;
+                if ($age < 18) {
+                    $errors[] = "You must be at least 18 years old.";
+                } elseif ($age > 120) {
+                    $errors[] = "Invalid DOB: Age exceeds reasonable limit.";
+                }
+            }
         }
-    }
 
-    // Profile picture handling (original code)
-    $profilePicName = null;
-    if (!empty($_FILES['profile_picture']['name'])) {
-        $targetDir = "uploads/";
-        if (!is_dir($targetDir)) {
-            mkdir($targetDir, 0777, true);
+        // Validate PIN Code: 6 digits, starts with 1-9, optional space, and basic city-based check
+        if (empty($pincode)) {
+            $errors[] = "PIN Code is required.";
+        } elseif (!preg_match('/^[1-9]\d{2}\s?\d{3}$/', $pincode)) {
+            $errors[] = "Invalid PIN Code: Must be exactly 6 digits (optional space after first 3) starting with 1-9.";
+        } else {
+            // Remove space for integer conversion
+            $pincode_clean = str_replace(' ', '', $pincode);
+            $pin_int = intval($pincode_clean);
+            $valid_pin = false;
+            switch ($city) {
+                case 'Delhi': // Example: 110000-110099
+                    if ($pin_int >= 110000 && $pin_int <= 110099) $valid_pin = true;
+                    break;
+                case 'Mumbai': // Example: 400000-400099
+                    if ($pin_int >= 400000 && $pin_int <= 400099) $valid_pin = true;
+                    break;
+                case 'Bengaluru': // Added example
+                    if ($pin_int >= 560000 && $pin_int <= 562162) $valid_pin = true;
+                    break;
+                // Add more cities here
+                default:
+                    $valid_pin = true; // If city not in list, allow (expand this or use API)
+            }
+            if (!$valid_pin) {
+                $errors[] = "Invalid PIN Code for selected city: Does not match the city's range.";
+            }
         }
-        $profilePicName = time() . "_" . basename($_FILES["profile_picture"]["name"]);
-        $targetFilePath = $targetDir . $profilePicName;
-        move_uploaded_file($_FILES["profile_picture"]["tmp_name"], $targetFilePath);
-    }
 
-    // If no errors, insert into DB
-    if (empty($errors)) {
-        $stmt = $conn->prepare("INSERT INTO customers (firstname, lastname, email, phone, dob, city, state, zip, profile_picture) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->bind_param("sssssssis", $firstname, $lastname, $email, $full_phone, $dob, $city, $state, $zip, $profilePicName);
-        $stmt->execute();
+        // Profile picture handling with security
+        $profilePicName = null;
+        if (!empty($_FILES['profile_picture']['name'])) {
+            $targetDir = "uploads/";
+            if (!is_dir($targetDir)) {
+                if (!mkdir($targetDir, 0777, true)) {
+                    $errors[] = "Failed to create upload directory.";
+                }
+            }
+            $allowed_types = ['image/jpeg', 'image/png', 'image/gif'];
+            $file_type = mime_content_type($_FILES['profile_picture']['tmp_name']);
+            if (!in_array($file_type, $allowed_types) || $_FILES['profile_picture']['size'] > 2000000) {  // 2MB limit
+                $errors[] = "Invalid profile picture: Only JPG/PNG/GIF up to 2MB allowed.";
+            } else {
+                $profilePicName = time() . "_" . basename($_FILES["profile_picture"]["name"]);
+                $targetFilePath = $targetDir . $profilePicName;
+                if (!move_uploaded_file($_FILES["profile_picture"]["tmp_name"], $targetFilePath)) {
+                    $errors[] = "File upload failed.";
+                }
+            }
+        }
 
-        $new_id = $conn->insert_id;
-        header("Location: manage-customers.php?new_id=" . $new_id);
-        exit;
+        // If no errors, insert into DB
+        if (empty($errors)) {
+            $stmt = $conn->prepare("INSERT INTO customers (firstname, lastname, email, phone, dob, city, state, pincode, profile_picture) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("sssssssis", $firstname, $lastname, $email, $full_phone, $dob, $city, $state, $pincode, $profilePicName);
+            if ($stmt->execute() && $stmt->affected_rows > 0) {
+                $new_id = $conn->insert_id;
+                // Regenerate CSRF token after successful submission
+                $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+                header("Location: manage-customers.php?new_id=" . $new_id . "&success=Customer added successfully");
+                exit;
+            } else {
+                $errors[] = "Database error: " . $stmt->error;
+            }
+            $stmt->close();
+        }
     }
 }
 ?>
@@ -194,13 +251,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="alert alert-danger">
                     <ul>
                         <?php foreach ($errors as $error): ?>
-                            <li><?= $error ?></li>
+                            <li><?= htmlspecialchars($error) ?></li> <!-- Sanitized for display -->
                         <?php endforeach; ?>
                     </ul>
                 </div>
             <?php endif; ?>
 
             <form method="POST" enctype="multipart/form-data" id="addCustomerForm">
+                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                 <div class="row g-3">
                     <div class="col-md-4">
                         <label for="firstname" class="form-label">First name</label>
@@ -288,14 +346,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </select>
                     </div>
                     <div class="col-md-4">
-                        <label for="zip" class="form-label">Zip</label>
-                        <input type="number" class="form-control" id="zip" name="zip" placeholder="Zip" required>
+                        <label for="pincode" class="form-label">Pin code</label>
+                        <input type="text" class="form-control" id="pincode" name="pincode" placeholder="Pin code" required> <!-- Changed to type="text" for space support -->
                     </div>
                 </div>
 
                 <div class="form-check mt-3">
-                    <input class="form-check-input" type="checkbox" id="invalidCheck2" required>
-                    <label class="form-check-label" for="invalidCheck2">Agree to terms and conditions</label>
+                    <input class="form-check-input" type="checkbox" id="agreeTerms" required>
+                    <label class="form-check-label" for="agreeTerms">
+                        I agree to the <a href="terms_and_conditions.php" target="_blank">Terms and Conditions</a>
+                    </label>
                 </div>
 
                 <button class="btn btn-success w-100 mt-3" type="submit">Submit</button>
@@ -309,7 +369,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script>
     document.addEventListener("DOMContentLoaded", function() {
-        const checkbox = document.getElementById("invalidCheck2");
+        const checkbox = document.getElementById("agreeTerms"); // Updated ID
         const submitBtn = document.querySelector("button[type='submit']");
         const form = document.getElementById("addCustomerForm");
         const phoneInput = document.getElementById("phone");
@@ -318,6 +378,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         const firstnameInput = document.getElementById("firstname");
         const lastnameInput = document.getElementById("lastname");
         const dobInput = document.getElementById("dob");
+        const pincodeInput = document.getElementById("pincode");
 
         submitBtn.disabled = true;
         checkbox.addEventListener("change", function() {
@@ -330,8 +391,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             const nameRegex = /^[A-Za-z\s\-']{2,50}$/;
             if (!nameRegex.test(name)) {
                 this.classList.add("is-invalid");
+                this.setAttribute('aria-invalid', 'true');
             } else {
                 this.classList.remove("is-invalid");
+                this.removeAttribute('aria-invalid');
             }
         });
 
@@ -341,8 +404,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             const nameRegex = /^[A-Za-z\s\-']{2,50}$/;
             if (!nameRegex.test(name)) {
                 this.classList.add("is-invalid");
+                this.setAttribute('aria-invalid', 'true');
             } else {
                 this.classList.remove("is-invalid");
+                this.removeAttribute('aria-invalid');
             }
         });
 
@@ -352,8 +417,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             const phoneRegex = /^[6-9]\d{0,9}$/;
             if (!phoneRegex.test(phone) || phone.length > 10) {
                 this.classList.add("is-invalid");
+                this.setAttribute('aria-invalid', 'true');
             } else {
                 this.classList.remove("is-invalid");
+                this.removeAttribute('aria-invalid');
             }
         });
 
@@ -364,12 +431,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             const age = today.getFullYear() - dob.getFullYear();
             if (dob > today || age < 18 || age > 120) {
                 this.classList.add("is-invalid");
+                this.setAttribute('aria-invalid', 'true');
             } else {
                 this.classList.remove("is-invalid");
+                this.removeAttribute('aria-invalid');
             }
         });
 
-        // Cities by state/UT object (comprehensive list from real sources)
+        // Client-side PIN Code check (6 digits, optional space, starts with 1-9)
+        pincodeInput.addEventListener("input", function() {
+            const pin = this.value.trim();
+            const pinRegex = /^[1-9]\d{2}\s?\d{3}$/;
+            if (!pinRegex.test(pin)) {
+                this.classList.add("is-invalid");
+                this.setAttribute('aria-invalid', 'true');
+            } else {
+                this.classList.remove("is-invalid");
+                this.removeAttribute('aria-invalid');
+            }
+        });
+
+        // Cities by state/UT object (comprehensive list from real sources) - Reverted to hardcoded as requested
         const citiesByState = {
             "Andaman and Nicobar Islands": ["Port Blair", "Car Nicobar", "Mayabunder", "Diglipur", "Rangat"],
             "Andhra Pradesh": ["Visakhapatnam", "Vijayawada", "Guntur", "Nellore", "Kurnool", "Rajahmundry", "Kakinada", "Tirupati", "Anantapur", "Kadapa", "Vizianagaram", "Eluru", "Ongole", "Nandyal", "Machilipatnam", "Adoni", "Tenali", "Proddatur", "Chittoor", "Hindupur", "Bhimavaram", "Madanapalle", "Guntakal", "Srikakulam", "Dharmavaram", "Gudivada", "Narasaraopet", "Tadipatri", "Tadepalligudem", "Amaravati", "Chilakaluripet"],
@@ -409,7 +491,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             "West Bengal": ["Kolkata", "Howrah", "Asansol", "Siliguri", "Durgapur", "Bardhaman", "Malda", "Baharampur", "Habra", "Kharagpur", "Shantipur", "Dankuni", "Dhulian", "Ranaghat", "Haldia", "Raiganj", "Krishnanagar", "Nabadwip", "Medinipur", "Jalpaiguri", "Balurghat", "Basirhat", "Bankura", "Chakdaha", "Darjeeling", "Purulia", "Jangipur", "Bolpur", "Bangaon", "Cooch Behar"]
         };
 
-        // Populate cities based on selected state
+        // Populate cities based on selected state - Reverted to hardcoded
         stateSelect.addEventListener("change", function() {
             const selectedState = this.value;
             citySelect.innerHTML = "<option value=''>Select City</option>"; // Reset cities
@@ -427,7 +509,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             const phoneValue = phoneInput.value.trim();
             if (phoneValue.length !== 10 || !/^\d{10}$/.test(phoneValue)) {
                 alert("Phone number must be exactly 10 digits.");
-                event.preventDefault(); // Prevent form submission
+                event.preventDefault();
+            }
+
+            const pinValue = pincodeInput.value.trim();
+            if (!/^[1-9]\d{2}\s?\d{3}$/.test(pinValue)) {
+                alert("PIN Code must be exactly 6 digits (optional space after first 3) starting with 1-9.");
+                event.preventDefault();
             }
         });
     });

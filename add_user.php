@@ -2,10 +2,14 @@
 session_start();
 require 'db_connect.php';
 
-$_SESSION['loggedin'] = true;
 if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
-    header("Location: login.php");  
+    header("Location: login.php"); 
     exit; 
+}
+
+// CSRF Token Generation
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
 // Fetch roles for dropdown
@@ -18,100 +22,132 @@ while ($role = $rolesResult->fetch_assoc()) {
 // Handle form submission
 $errors = []; // Array to store validation errors
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
-    $firstname = trim($_POST['firstname']);
-    $lastname = trim($_POST['lastname']);
-    $email = trim($_POST['email']);
-    $password = trim($_POST['password']);
-    $confirm_password = trim($_POST['confirm_password']);
-    $role_id = intval($_POST['role_id']);
-
-    // Firstname Validation Checks
-    if (empty($firstname)) {
-        $errors[] = "First Name is required.";
-    } elseif (strlen($firstname) < 2 || strlen($firstname) > 50) {
-        $errors[] = "First Name must be between 2 and 50 characters.";
-    } elseif (!preg_match("/^[A-Za-z\s\-']+$/", $firstname)) {
-        $errors[] = "Invalid First Name: Only alphabets, spaces, hyphens, and apostrophes allowed.";
+    // CSRF Validation
+    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+        $errors[] = "Invalid form submission (CSRF token mismatch).";
     } else {
-        // Profanity check (simple example, expand list as needed)
-        $bad_words = ['badword', 'offensive']; // Add more prohibited words
-        if (in_array(strtolower($firstname), $bad_words)) {
-            $errors[] = "Invalid First Name: Contains prohibited words.";
-        }
-    }
+        $firstname = trim($_POST['firstname']);
+        $lastname = trim($_POST['lastname']);
+        $email = trim($_POST['email']);
+        $password = trim($_POST['password']);
+        $confirm_password = trim($_POST['confirm_password']);
+        $role_id = intval($_POST['role_id']);
 
-    // Lastname Validation Checks
-    if (empty($lastname)) {
-        $errors[] = "Last Name is required.";
-    } elseif (strlen($lastname) < 2 || strlen($lastname) > 50) {
-        $errors[] = "Last Name must be between 2 and 50 characters.";
-    } elseif (!preg_match("/^[A-Za-z\s\-']+$/", $lastname)) {
-        $errors[] = "Invalid Last Name: Only alphabets, spaces, hyphens, and apostrophes allowed.";
-    } else {
-        // Profanity check
-        if (in_array(strtolower($lastname), $bad_words)) {
-            $errors[] = "Invalid Last Name: Contains prohibited words.";
-        }
-    }
-
-    // Email Validation (assuming basic, add more if needed)
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $errors[] = "Invalid email format.";
-    }
-
-    // Password Validation Checks
-    if (empty($password)) {
-        $errors[] = "Password is required.";
-    } elseif (strlen($password) < 8) {
-        $errors[] = "Password must be at least 8 characters long.";
-    } elseif (!preg_match('/[A-Z]/', $password) || !preg_match('/[a-z]/', $password) || !preg_match('/[0-9]/', $password) || !preg_match('/[!@#$%^&*(),.?":{}|<>]/', $password)) {
-        $errors[] = "Password must include at least one uppercase letter, one lowercase letter, one number, and one special character.";
-    } elseif ($password !== $confirm_password) {
-        $errors[] = "Passwords do not match.";
-    } else {
-        // No common patterns (simple check, expand as needed)
-        $common_patterns = ['password', '123456', 'qwerty', 'letmein'];
-        if (in_array(strtolower($password), $common_patterns)) {
-            $errors[] = "Password is too common; choose a stronger one.";
-        }
-    }
-
-    // Profile picture handling
-    $profile_picture = 'default.jpeg'; // Default if no upload
-    if (isset($_FILES['profile_picture']) && $_FILES['profile_picture']['error'] === 0) {
-        $allowed_extensions = ['jpg', 'jpeg', 'png', 'gif'];
-        $file_name = $_FILES['profile_picture']['name'];
-        $file_tmp = $_FILES['profile_picture']['tmp_name'];
-        $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
-
-        if (in_array($file_ext, $allowed_extensions)) {
-            $unique_name = uniqid() . '_' . basename($file_name); // Unique filename to avoid overwrites
-            $upload_path = 'uploads/' . $unique_name;
-            if (move_uploaded_file($file_tmp, $upload_path)) {
-                $profile_picture = $unique_name;
-            } else {
-                $errors[] = "Error uploading profile picture.";
+        // Firstname Validation Checks
+        if (empty($firstname)) {
+            $errors[] = "First Name is required.";
+        } elseif (strlen($firstname) < 2 || strlen($firstname) > 50) {
+            $errors[] = "First Name must be between 2 and 50 characters.";
+        } elseif (!preg_match("/^[A-Za-z\s\-']+$/", $firstname)) {
+            $errors[] = "Invalid First Name: Only alphabets, spaces, hyphens, and apostrophes allowed.";
+        } else {
+            // Profanity check (simple example, expand list as needed)
+            $bad_words = ['badword', 'offensive']; // Add more prohibited words
+            if (in_array(strtolower($firstname), $bad_words)) {
+                $errors[] = "Invalid First Name: Contains prohibited words.";
             }
-        } else {
-            $errors[] = "Invalid file type! Only JPG, JPEG, PNG, GIF allowed.";
         }
-    }
 
-    // If no errors, insert into DB
-    if (empty($errors)) {
-        $hashed_password = password_hash($password, PASSWORD_DEFAULT); // Hash the password
-        $stmt = $conn->prepare("INSERT INTO users (firstname, lastname, email, password, is_active, created_at, Role_ID, profile_picture) VALUES (?, ?, ?, ?, 1, NOW(), ?, ?)");
-        $stmt->bind_param("ssssis", $firstname, $lastname, $email, $hashed_password, $role_id, $profile_picture);
-
-        if ($stmt->execute()) {
-            echo "<script>alert('User added successfully!'); window.location='manage-roles.php';</script>";
+        // Lastname Validation Checks
+        if (empty($lastname)) {
+            $errors[] = "Last Name is required.";
+        } elseif (strlen($lastname) < 2 || strlen($lastname) > 50) {
+            $errors[] = "Last Name must be between 2 and 50 characters.";
+        } elseif (!preg_match("/^[A-Za-z\s\-']+$/", $lastname)) {
+            $errors[] = "Invalid Last Name: Only alphabets, spaces, hyphens, and apostrophes allowed.";
         } else {
-            echo "<script>alert('Error adding user!');</script>";
+            // Profanity check
+            if (in_array(strtolower($lastname), $bad_words)) {
+                $errors[] = "Invalid Last Name: Contains prohibited words.";
+            }
         }
-    } else {
-        // Show errors in alert for simplicity (you can display in form too)
-        $error_msg = implode("\\n", $errors);
-        echo "<script>alert('$error_msg');</script>";
+
+        // Email Validation and Uniqueness
+        if (empty($email)) {
+            $errors[] = "Email is required.";
+        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $errors[] = "Invalid email format.";
+        } else {
+            // Uniqueness Check
+            $stmt = $conn->prepare("SELECT id FROM users WHERE email = ?");
+            $stmt->bind_param("s", $email);
+            $stmt->execute();
+            $stmt->store_result();
+            if ($stmt->num_rows > 0) {
+                $errors[] = "This email is already registered.";
+            }
+            $stmt->close();
+        }
+
+        // Password Validation Checks
+        if (empty($password)) {
+            $errors[] = "Password is required.";
+        } elseif (strlen($password) < 8) {
+            $errors[] = "Password must be at least 8 characters long.";
+        } elseif (!preg_match('/[A-Z]/', $password) || !preg_match('/[a-z]/', $password) || !preg_match('/[0-9]/', $password) || !preg_match('/[!@#$%^&*(),.?":{}|<>]/', $password)) {
+            $errors[] = "Password must include at least one uppercase letter, one lowercase letter, one number, and one special character.";
+        } elseif ($password !== $confirm_password) {
+            $errors[] = "Passwords do not match.";
+        } else {
+            // No common patterns (simple check, expand as needed)
+            $common_patterns = ['password', '123456', 'qwerty', 'letmein'];
+            if (in_array(strtolower($password), $common_patterns)) {
+                $errors[] = "Password is too common; choose a stronger one.";
+            }
+        }
+
+        // Role Validation
+        if (empty($role_id) || $role_id <= 0) {
+            $errors[] = "Please select a valid role.";
+        }
+
+        // Profile picture handling with security
+        $profile_picture = 'default.jpeg'; // Default if no upload
+        if (isset($_FILES['profile_picture']) && $_FILES['profile_picture']['error'] === 0) {
+            $allowed_extensions = ['jpg', 'jpeg', 'png', 'gif'];
+            $allowed_types = ['image/jpeg', 'image/png', 'image/gif'];
+            $file_name = $_FILES['profile_picture']['name'];
+            $file_tmp = $_FILES['profile_picture']['tmp_name'];
+            $file_size = $_FILES['profile_picture']['size'];
+            $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
+            $file_type = mime_content_type($file_tmp);
+
+            if (!in_array($file_ext, $allowed_extensions) || !in_array($file_type, $allowed_types) || $file_size > 2000000) { // 2MB limit
+                $errors[] = "Invalid profile picture: Only JPG, JPEG, PNG, GIF up to 2MB allowed.";
+            } else {
+                $unique_name = uniqid() . '_' . basename($file_name); // Unique filename
+                $upload_path = 'uploads/' . $unique_name;
+                if (!is_dir('uploads/')) {
+                    mkdir('uploads/', 0777, true);
+                }
+                if (move_uploaded_file($file_tmp, $upload_path)) {
+                    $profile_picture = $unique_name;
+                } else {
+                    $errors[] = "Error uploading profile picture.";
+                }
+            }
+        }
+
+        // Terms Agreement Check
+        if (!isset($_POST['agree_terms'])) {
+            $errors[] = "You must agree to the Terms and Conditions.";
+        }
+
+        // If no errors, insert into DB
+        if (empty($errors)) {
+            $hashed_password = password_hash($password, PASSWORD_DEFAULT); // Hash the password
+            $stmt = $conn->prepare("INSERT INTO users (firstname, lastname, email, password, is_active, created_at, Role_ID, profile_picture) VALUES (?, ?, ?, ?, 1, NOW(), ?, ?)");
+            $stmt->bind_param("ssssis", $firstname, $lastname, $email, $hashed_password, $role_id, $profile_picture);
+
+            if ($stmt->execute()) {
+                // Regenerate CSRF token
+                $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+                header("Location: manage-roles.php?success=User added successfully");
+                exit;
+            } else {
+                $errors[] = "Error adding user: " . $stmt->error;
+            }
+        }
     }
 }
 ?>
@@ -145,7 +181,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     <div class="container my-5">
         <div class="form-container">
             <h2 class="text-center mb-4">Add New User</h2>
+
+            <!-- Show errors if any -->
+            <?php if (!empty($errors)): ?>
+                <div class="alert alert-danger">
+                    <ul>
+                        <?php foreach ($errors as $error): ?>
+                            <li><?= htmlspecialchars($error) ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
+            <?php endif; ?>
+
             <form method="POST" id="addUserForm" enctype="multipart/form-data"> <!-- Added enctype for file upload -->
+                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                 <div class="mb-3">
                     <label for="firstname" class="form-label fw-bold">First Name</label>
                     <input type="text" class="form-control" id="firstname" name="firstname" required>
@@ -187,10 +236,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
                 <div class="mb-3">
                     <label for="role_id" class="form-label fw-bold">Role</label>
                     <select class="form-select" id="role_id" name="role_id" required>
+                        <option value="">Select Role</option>
                         <?php foreach ($roles as $role) { ?>
                             <option value="<?= $role['Role_ID'] ?>"><?= htmlspecialchars($role['Role_Name']) ?></option>
                         <?php } ?>
                     </select>
+                </div>
+
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="agree_terms" name="agree_terms" required>
+                    <label class="form-check-label" for="agree_terms">
+                        I agree to the <a href="terms_and_conditions.php" target="_blank">Terms and Conditions</a>
+                    </label>
                 </div>
 
                 <button type="submit" name="add_user" class="btn btn-primary w-100">Add User</button>
@@ -237,7 +294,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
             const lengthValid = password.length >= minLength;
 
             // Common patterns check
-            const commonPatterns = ['password', '123456', 'qwerty', 'letmein', 'welcome'];
+            const commonPatterns = ['password', '123456', 'qwerty', 'letmein'];
             const isCommon = commonPatterns.includes(password.toLowerCase());
 
             let strength = 'Weak';
