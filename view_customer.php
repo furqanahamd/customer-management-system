@@ -104,8 +104,8 @@ if (!$customer) {
                         </div>
 
                         <div class="detail-row mb-2">
-                            <span class="detail-label">Zip:</span>
-                            <span class="detail-value"><?= htmlspecialchars($customer['zip']) ?></span>
+                            <span class="detail-label">pincode:</span>
+                            <span class="detail-value"><?= htmlspecialchars($customer['pincode']) ?></span>
                         </div>
 
                         <div class="detail-row mb-2">
